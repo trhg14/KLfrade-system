@@ -1,6 +1,6 @@
 import torch
 from ultralytics import YOLO
-from src.config import CLASSES, CLASSES_10_CLASS, CLASSES_4_CLASS, CLASSES_8_CLASS
+from src.config import CLASSES_8_CLASS
 
 
 class YOLOModel:
@@ -23,16 +23,7 @@ class YOLOModel:
 
     def _get_class_mapping(self):
         """Match number of classes to config definitions."""
-        if self.num_classes == 5:
-            print("Using 5-class mapping (CLASSES)")
-            return CLASSES
-        elif self.num_classes == 10:
-            print("Using 10-class mapping (CLASSES_10_CLASS)")
-            return CLASSES_10_CLASS
-        elif self.num_classes == 4:
-            print("Using 4-class mapping (CLASSES_4_CLASS)")
-            return CLASSES_4_CLASS
-        elif self.num_classes == 8:
+        if self.num_classes == 8:
             print("Using 8-class mapping (CLASSES_8_CLASS)")
             return CLASSES_8_CLASS
         else:
