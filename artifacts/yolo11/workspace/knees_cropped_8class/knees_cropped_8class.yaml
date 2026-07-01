@@ -1,0 +1,14 @@
+path: D:\DATN\code\code
+train: D:\DATN\code\code\datasets\datasets\splits\knees_cropped_8class\train.txt
+val: D:\DATN\code\code\datasets\datasets\splits\knees_cropped_8class\val.txt
+test: D:\DATN\code\code\datasets\datasets\splits\knees_cropped_8class\test.txt
+nc: 8
+names:
+  0: KL1-a
+  1: KL1-b
+  2: KL2-a
+  3: KL2-b
+  4: KL3-a
+  5: KL3-b
+  6: KL4-a
+  7: KL4-b

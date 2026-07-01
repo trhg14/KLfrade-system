@@ -1,0 +1,285 @@
+Dưới đây là **kiến trúc Object + Context** đúng với dataset của bạn (X-ray gối, 1 hoặc 2 gối/ảnh, có bbox **khớp gối + khe khớp + gai xương**, label KL 10-class **theo ảnh**). Mình viết theo kiểu “spec kỹ thuật + ghi chú lưu ý từng bước” để bạn đem triển khai/trình bày luận văn được luôn.
+
+Dataset:
+- images: dataset/dataset_v0/images/
+- labels: dataset/dataset_v0/labels/
+- labels-knee: dataset/dataset_v0/labels-knee/
+- Class tại: src/config.py
+
+# 00) Các bước chuẩn bị dữ liệu (Data Preparation)
+
+Trước khi train model, bạn cần chạy 2 lệnh sau để tạo nhãn và phân chia tập dữ liệu:
+
+1.  **Tạo nhãn 10-class từ các file lesion YOLO gốc:**
+    Lệnh này sẽ quét thư mục `dataset/dataset_v0/labels`, phân loại lesion dựa trên kích thước (gai vs khe khớp) và tạo ra bộ nhãn mới trong `dataset/dataset_v0/labels_new`.
+
+    ```bash
+    python tools/check_dataset/class_split_report.py \
+        --labels-dir dataset/dataset_v0/labels \
+        --save-dir dataset/dataset_v0/labels_new \
+        --limit 10
+    ```
+
+2.  **Chia Dataset (Train/Val/Test):**
+    Lệnh này chia dữ liệu dựa trên file ảnh và nhãn gối (để đảm bảo ảnh có gối mới được dùng), output ra thư mục `splits/knee_full_10_class`.
+
+    ```bash
+    python scripts/data_preparation/split_dataset.py \
+        --img_dir dataset/dataset_v0/images \
+        --label_dir dataset/dataset_v0/labels-knee \
+        --out_dir splits/knee_full_10_class \
+        --train 0.7 \
+        --val 0.15 \
+        --test 0.15 \
+        --seed 42
+    ```
+    *Lưu ý: Sau khi chạy, file split sẽ nằm ở `splits/knee_full_10_class/train.txt`, v.v.*
+
+
+# Kiến trúc đề xuất: **Knee Instance Object–Context MIL Network (KIOCMIL)**
+
+## Mục tiêu
+
+* Dự đoán **10-class**: `KL0-a … KL4-b`
+* Trong đó:
+
+  * `a` (even class: 0,2,4,6,8) = **Osteophyte**
+  * `b` (odd class: 1,3,5,7,9) = **Joint space**
+* Ảnh có thể có **1 gối** hoặc **2 gối**, label là **theo ảnh** → cần cơ chế **MIL pooling** theo từng gối.
+
+---
+
+# 0) Input/Label format
+
+## Input
+
+* Ảnh X-ray (AP bilateral, AP single, Lateral)
+
+## Annotation YOLO (normalized)
+
+* **Knee bbox**: class `KNEE_CLASS=0`
+  Có thể 1 box (1 gối) hoặc 2 box (2 gối).
+* **Lesion bbox**:
+
+  * `JS_CLASSES = {...}` khe khớp
+  * `OST_CLASSES = {...}` gai xương
+
+## Image-level label
+
+* `y10 ∈ {0..9}` theo ảnh (10-class KL)
+
+**Yêu cầu xử lý:**
+
+* Dataset có lợi thế: bbox khe/gai giúp model “nhìn đúng chỗ”, hạn chế học theo shortcut. Tận dụng triệt để thông tin này.
+
+---
+
+# 1) Knee Instance Extraction (quan trọng nhất)
+
+## 1.1 Parse YOLO txt → danh sách bbox pixel
+
+* Convert `(xc,yc,w,h)` normalized → `(x1,y1,x2,y2)` pixel.
+
+**Yêu cầu kỹ thuật:**
+
+* Luôn `clip` bbox vào khung ảnh.
+* Bỏ bbox quá nhỏ (noise): `area < MIN_BOX_PX^2`.
+
+## 1.2 Xác định số knee instances
+
+* Nếu có `n` bbox class 0:
+
+  * `n=1`: ảnh 1 gối
+  * `n=2`: ảnh 2 gối
+* Nếu thiếu knee bbox : Lọc ảnh ra khỏi dataset.
+
+---
+
+# 2) Lesion-to-Knee Assignment (gán bbox khe/gai vào đúng gối)
+
+## 2.1 Gán theo “center-in-knee” ưu tiên
+
+Với mỗi lesion bbox:
+
+1. lấy center lesion
+2. nếu center nằm trong knee bbox nào → gán knee đó
+3. nếu không nằm trong cái nào → gán theo knee có khoảng cách center nhỏ nhất
+
+**Yêu cầu gán:**
+
+* Tránh dùng IoU thuần vì lesion box nhỏ, IoU dễ ~0.
+* Nếu ảnh lateral chỉ có 1 knee bbox thì gán thẳng.
+
+---
+
+# 3) Tạo **Object tokens + Context token** cho từng knee instance
+
+Mỗi knee instance `k` tạo 3 loại crop (token):
+
+## 3.1 Context token (CTX)
+
+* `CTX_BOX = expand(knee_box, scale=2.0)`
+  (lateral có thể 2.2)
+
+**Yêu cầu Context:**
+
+* Context giúp model hiểu alignment, độ xoay, chất lượng chụp.
+* Đừng expand quá lớn → dính nền nhiều, tăng noise.
+
+## 3.2 Joint-space token (JS)
+
+* Lấy tất cả lesion bbox thuộc `JS_CLASSES` nằm trong knee instance.
+* Nếu có nhiều bbox → **multi-patch JS**:
+
+  * crop từng bbox → encode → average/max pooling feature.
+* Nếu không có bbox JS → fallback heuristic:
+
+  * lấy “horizontal band” quanh trung tâm của knee_box (22% height) để đại diện khe.
+
+**Yêu cầu JS Token:**
+
+* JS bbox thường cực nhỏ → crop nhỏ dễ bị mất signal khi resize.
+* **Bắt buộc**: khi crop JS patch, **pad** thêm 10–20% bbox trước khi resize.
+
+## 3.3 Osteophyte token (OST)
+
+* Lấy lesion bbox thuộc `OST_CLASSES` trong knee instance.
+* Nếu nhiều bbox → multi-patch tương tự JS.
+* Nếu không có OST bbox → fallback heuristic:
+
+  * crop 2 “corner patches” ở rìa mâm chày (medial/lateral) hoặc patch biên trên của tibia trong knee_box.
+
+**Yêu cầu OST Token:**
+
+* OST xuất hiện ở rìa xương: patch “biên” tốt hơn patch trung tâm.
+* Nếu bbox OST có thể nằm cả femur/tibia → giữ multi-patch, đừng chọn 1 box duy nhất.
+
+---
+
+# 4) Encoder & Fusion (Object + Context)
+
+## 4.1 Token Encoder (shared backbone)
+
+* 1 backbone CNN chung (ResNet/ConvNeXt/EfficientNet)
+* Mỗi patch (CTX/JS/OST) → feature vector `d` (vd 256)
+
+**Yêu cầu Encoder:**
+
+* Shared encoder giúp nhất quán đặc trưng giữa tokens và giảm tham số.
+
+## 4.2 Fusion trong 1 knee instance
+
+Có 2 lựa chọn:
+
+### Option A (đơn giản, rất hiệu quả)
+
+* `f_knee = MLP([f_ctx, f_js, f_ost])`
+
+### Option B (xịn hơn)
+
+* Transformer-lite 1–2 layer cho tokens `[ctx, js, ost]`
+* lấy token đã attention làm `f_knee`
+
+**Lựa chọn:**
+
+* Option A đủ mạnh cho luận văn và dễ debug (Recommended).
+* Option B đẹp để viết paper “object-context interaction”.
+
+---
+
+# 5) MIL Pooling (vì label theo ảnh)
+
+Bạn sẽ có `K` knee instances (K=1 hoặc 2). Mỗi instance có feature `f_knee_i`.
+
+## 5.1 Pooling ra feature ảnh `f_img`
+
+2 lựa chọn:
+
+### Max pooling (khuyến nghị baseline)
+
+* `f_img = max_i(f_knee_i)` (theo từng chiều feature)
+* Hợp với label kiểu “gối nặng nhất quyết định KL”.
+
+### Attention pooling (khuyến nghị khi dataset đa dạng)
+
+* Tính trọng số `w_i = softmax(g(f_knee_i))`
+* `f_img = Σ w_i f_knee_i`
+
+**Lựa chọn Pooling:**
+
+* Nếu bilateral nhưng label theo ảnh, attention pooling thường ổn hơn khi 2 gối khác nhau nhẹ.
+* Bạn có thể train cả 2 và chọn tốt nhất.
+
+---
+
+# 6) Multi-head Outputs (tận dụng cấu trúc label 10-class)
+
+Từ `f_img` dự đoán:
+
+## 6.1 Head 10-class
+
+* `logits10 → CE(logits10, y10)`
+
+## 6.2 Head grade (0..4)
+
+* `grade = y10 // 2`
+* loss: CE 5-class hoặc ordinal regression
+
+## 6.3 Head type (Osteophyte vs Joint-space)
+
+* `type_ost = 1 nếu y10 chẵn (a), 0 nếu lẻ (b)`
+* loss: BCE
+
+**Tổng loss**
+
+* `L = L10 + 0.5*Lgrade + 0.25*Ltype`
+
+**Thiết kế Loss:**
+
+* Head_type làm “regularizer” rất mạnh: ép model phân biệt đúng bản chất a/b, giảm nhầm lẫn.
+
+---
+
+# 7) Training notes (những lưu ý “ăn điểm”)
+
+## 7.1 Resize/crop
+
+* CTX crop: 384 hoặc 448
+* JS/OST crop: 256 hoặc 320 (nhỏ hơn cũng được, nhưng cần pad bbox trước)
+
+## 7.2 Augmentation (an toàn y khoa)
+
+* brightness/contrast nhẹ, gamma nhẹ
+* gaussian noise nhẹ
+* rotate rất nhẹ (±3°)
+* tránh warp mạnh/cutout lớn (dễ phá osteophyte nhỏ)
+
+## 7.3 Class imbalance
+
+* 10-class KL thường lệch → dùng:
+
+  * weighted CE hoặc focal loss cho L10
+  * sampler theo class
+
+## 7.4 Leakage
+
+* Nếu có nhiều ảnh của cùng bệnh nhân theo thời gian → split theo patient để tránh leak (nếu bạn có patient id).
+
+## 7.5 Debug bắt buộc
+
+* In ra overlay bbox knee + JS + OST trên vài ảnh mỗi epoch (để chắc chắn crop đúng).
+* Kiểm tra tỷ lệ “fallback heuristic” (ảnh không có bbox JS/OST) → nếu cao, cần xem lại label.
+
+---
+
+# 8) Inference & explainability
+
+* Report:
+
+  * knee instance nào được attention cao nhất (nếu dùng attention pooling)
+  * patch JS/OST nào contribute mạnh
+* Tạo heatmap Grad-CAM trên CTX/JS/OST patch để chứng minh model nhìn đúng vùng tổn thương.
+
+---
+
+**KIOCMIL** chia ảnh thành các **knee instances**, trích xuất **object tokens (joint space/osteophyte)** và **context token**, hợp nhất đặc trưng theo từng gối, sau đó dùng **MIL pooling** để dự đoán KL theo ảnh với **multi-head supervision** (10-class, grade, type) nhằm tăng độ chính xác và tính giải thích.
