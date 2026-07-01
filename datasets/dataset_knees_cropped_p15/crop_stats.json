@@ -1,0 +1,9 @@
+{
+  "total_images": 1489,
+  "cropped": 2002,
+  "skipped_no_knee_box": 1,
+  "skipped_too_small": 444,
+  "total_kl_boxes_original": 2678,
+  "total_kl_boxes_transformed": 2745,
+  "total_kl_boxes_dropped": 0
+}

@@ -1,0 +1,12 @@
+{
+  "total_images": 2002,
+  "kept_images": 1924,
+  "filtered_images": 78,
+  "original_boxes": 2745,
+  "kept_boxes": 2656,
+  "filtered_boxes": 84,
+  "classes_removed": [
+    0
+  ],
+  "output_classes": 4
+}

@@ -1,9 +1,0 @@
-﻿venv/
-__pycache__/
-*.pyc
-datasets/
-runs/
-*.pt
-.env
-knee_yolo11n/
-lesion_8class_balanced/

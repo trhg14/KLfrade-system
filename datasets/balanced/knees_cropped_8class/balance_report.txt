@@ -1,0 +1,26 @@
+============================================================
+DATASET BALANCING REPORT
+============================================================
+
+Strategy: flip
+Target strategy: median
+
+Original Distribution:
+  Class 0:   458 instances
+  Class 1:    80 instances
+  Class 2:  1105 instances
+  Class 3:   133 instances
+  Class 4:   480 instances
+  Class 5:   100 instances
+  Class 6:   250 instances
+  Class 7:    50 instances
+
+Final Distribution:
+  Class 0:   458 instances (   0 augmented)
+  Class 1:   191 instances ( 111 augmented)
+  Class 2:  1105 instances (   0 augmented)
+  Class 3:   191 instances (  58 augmented)
+  Class 4:   480 instances (   0 augmented)
+  Class 5:   191 instances (  91 augmented)
+  Class 6:   250 instances (   0 augmented)
+  Class 7:   191 instances ( 141 augmented)
