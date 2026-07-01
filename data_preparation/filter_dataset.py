@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.append(os.getcwd())
 
 from src.data.filter import DatasetFilter
-from src.data.utils import parse_yolo_label
+from src.data.dataset_utils import parse_yolo_label
 
 def load_class_distribution(label_dir: Path):
     from collections import Counter

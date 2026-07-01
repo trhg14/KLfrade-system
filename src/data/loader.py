@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 from tqdm import tqdm
 from collections import defaultdict
-from src.data.utils import get_image_files, parse_yolo_label
+from src.data.dataset_utils import get_image_files, parse_yolo_label
 
 def load_dataset_mapping(
     img_dir: Path, label_dir: Path

@@ -2,7 +2,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 from tqdm import tqdm
-from src.data.utils import parse_yolo_label
+from src.data.dataset_utils import parse_yolo_label
 
 class DatasetFilter:
     def __init__(self, threshold_percent: float):
